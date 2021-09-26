@@ -35,15 +35,29 @@ class Parser extends HtmlParser
 
         foreach ($features as $feature) {
             $lower_feature = strtolower($feature);
-            if (str_contains($lower_feature, "dimensions")) {
-                $dimension_string = explode(" ", $lower_feature);
-                $dims = FeedHelper::getDimsInString($dimension_string[1], "x");
+            if (preg_match("/\d*((\.\d+)|(\s+\d+\/\d+)*)(\"|')+[a-zA-z\s]*x[a-zA-z\s]*\d*((\.\d+)|(\s+\d+\/\d+)*)(\"|')+/",$lower_feature)) {
+                $matches = [];
+                preg_match("/\d*((\.\d+)|(\s+\d+\/\d+)*)(\"|')+[a-zA-z\s]*x[a-zA-z\s]*\d*((\.\d+)|(\s+\d+\/\d+)*)(\"|')+/",$lower_feature,$matches);
+                $dims = FeedHelper::getDimsInString($matches[0],"x");
             }
             else if (str_contains($lower_feature, "weight")) {
                 if (str_contains($lower_feature, "shipping weight")) {
-                    $shipping_weight = preg_match("!\d+!", $lower_feature);
+                    $matches = [];
+                    preg_match("/\d+/", $lower_feature,$matches);
+                    $shipping_weight = $matches[0];
+                    if(isset($matches[0])) {
+                        $shipping_weight = $matches[0];
+                    } else {
+                        $short_desc[] = $feature;
+                    }
                 } else {
-                    $weight = preg_match("!\d+!", $lower_feature);
+                    $matches = [];
+                    preg_match("/\d+/", $lower_feature,$matches);
+                    if(isset($matches[0])) {
+                        $weight = $matches[0];
+                    } else {
+                        $short_desc[] = $feature;
+                    }
                 }
             }
             else if (str_contains($lower_feature, ":")) {
@@ -51,7 +65,9 @@ class Parser extends HtmlParser
                 $key = trim($arr[0]);
                 $value = trim($arr[1]);
 
-                $attributes[$key] = $value;
+                if($value !== "") {
+                    $attributes[$key] = $value;
+                }
             } else {
                 $short_desc[] = $lower_feature;
             }
@@ -117,17 +133,17 @@ class Parser extends HtmlParser
 
     public function getDimX(): ?float
     {
-        return $this->dims["x"];
+        return $this->isGroup() ? $this->dims["x"] : null;
     }
 
     public function getDimY(): ?float
     {
-        return $this->dims["y"];
+        return $this->isGroup() ? $this->dims["y"] : null;
     }
 
     public function getDimZ(): ?float
     {
-        return $this->dims["z"];
+        return $this->isGroup() ? $this->dims["z"] : null;
     }
 
     public function getShippingWeight(): ?float
@@ -142,10 +158,10 @@ class Parser extends HtmlParser
 
     public function getImages(): array
     {
-        $image_sources = [];
 
         // relative ссылки
-        $image_sources[] =  $this->getAttr(".store-product-primary-image > a","href");
+        $image_sources =  $this->filter(".store-product-thumb")->each(static fn(ParserCrawler $c) => $c->attr("href"));
+
 
         // конвертирование в абсолютный
         foreach ($image_sources as &$image_source) {
@@ -172,7 +188,20 @@ class Parser extends HtmlParser
 
     public function getDescription(): string
     {
-        return $this->getHtml("#desc");
+        $description = "";
+        // если описание в низу сушествует
+        if($this->exists("#desc")) {
+            $description = $this->getHtml("#desc");
+        }
+
+        // поискать описание в features
+        $this->filter(".store-product-description > *:nth-child(2)")->each(static function(ParserCrawler $c) use(&$description){
+            if($c->nodeName() === "p") {
+                $description = $c->outerHtml();
+            }
+        });
+
+        return $description;
     }
 
     public function getVideos(): array
@@ -197,6 +226,10 @@ class Parser extends HtmlParser
     {
         $files = [];
         $this->filter(".technical-docs a")->each(static function (ParserCrawler $c) use (&$files) {
+            # если не валидная ссылка, не добавлять
+            if($c->attr("href")[0] === "#") {
+                return;
+            }
             $files[] = [
                 "name" => $c->text(),
                 "link" => $c->attr("href")
@@ -213,9 +246,11 @@ class Parser extends HtmlParser
     public function getChildProducts(FeedItem $parent_fi): array
     {
         $child = [];
-        $this->filter(".product-options")->each(function (ParserCrawler $c) use (&$child, $parent_fi) {
-            $fi = clone $parent_fi;
+        $i = 0;
+        $this->filter("#package-options + .row-wrapper > *")->each(function (ParserCrawler $c) use (&$child, $parent_fi,&$i) {
 
+            $fi = clone $parent_fi;
+            $i++;
             $array = $this->parseFeatures($c->getContent(".product-options-description li"));
 
             $fi->setShortdescr($array["short_description"]);
@@ -227,7 +262,7 @@ class Parser extends HtmlParser
             $fi->setWeight($array["weight"]);
 
             $fi->setProduct($c->getText("h3"));
-            $fi->setMpn($parent_fi->getMpn()."-".$c->attr("data-mutate"));
+            $fi->setMpn($parent_fi->getMpn()."-".$i);
             $fi->setImages([ $c->getAttr("img","src") ]);
             $fi->setRAvail($this->getAvail());
 

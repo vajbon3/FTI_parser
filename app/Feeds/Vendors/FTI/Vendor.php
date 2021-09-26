@@ -7,6 +7,7 @@ use App\Feeds\Processor\SitemapHttpProcessor;
 use App\Feeds\Utils\Data;
 use App\Feeds\Utils\Link;
 use App\Helpers\StringHelper;
+use JetBrains\PhpStorm\Pure;
 
 class Vendor extends SitemapHttpProcessor
 {
@@ -16,15 +17,14 @@ class Vendor extends SitemapHttpProcessor
 
     protected array $first = [ "https://www.firstteaminc.com/sitemap.xml" ];
 
-    public array $custom_products = [
-        "https://www.firstteaminc.com/soccer-equipment/portable-soccer-goals/golden-goal",
-        "https://www.firstteaminc.com/basketball-equipment/backboards/playground-backboards/ft216"
-    ];
-
     protected array $headers = [
         "Accept" => "*/*",
         "Host" => "firstteaminc.com"
     ];
+
+//    public array $custom_products = [
+//      "https://www.firstteaminc.com/soccer-equipment/portable-soccer-goals/golden-goal"
+//    ];
 
     public function getProductsLinks( Data $data, string $url ): array
     {
@@ -40,14 +40,16 @@ class Vendor extends SitemapHttpProcessor
         return parent::getProductsLinks( $data, $url );
     }
 
-    /*
     public function filterProductLinks( Link $link ): bool
     {
-        // todo
+        $url = $link->getUrl();
+        return str_contains($url,"equipment/") || str_contains($url,"seating/")
+            || str_contains($url,"other-sports/");
     }
 
-    public function isValidFeedItem( FeedItem $fi ): bool
+    public function isValidFeedItem(FeedItem $fi ): bool
     {
-        // todo
-    } */
+        return ($fi->getProduct() !== "" && $fi->getProduct() !== "Dummy") &&
+            (($fi->mpn !== null && $fi->mpn !== "") || $fi->isGroup());
+    }
 }

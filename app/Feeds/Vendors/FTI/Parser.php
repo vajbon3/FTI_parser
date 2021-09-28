@@ -155,7 +155,7 @@ class Parser extends HtmlParser
 
     public function getImages(): array
     {
-        return $this->filter(".store-product-thumb")->each(static fn(ParserCrawler $c) => $c->attr("href"));
+        return $this->filter(".store-product-thumb")->each(static fn(ParserCrawler $c) => $c->filter("a")->link()->getUri());
     }
 
     public function getCategories(): array

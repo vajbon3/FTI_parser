@@ -7,24 +7,13 @@ use App\Feeds\Processor\SitemapHttpProcessor;
 use App\Feeds\Utils\Data;
 use App\Feeds\Utils\Link;
 use App\Helpers\StringHelper;
-use JetBrains\PhpStorm\Pure;
 
 class Vendor extends SitemapHttpProcessor
 {
 
-    protected const CHUNK_SIZE = 1;
-    protected const DELAY_S = 0.7;
+    protected const CHUNK_SIZE = 10;
 
     protected array $first = [ "https://www.firstteaminc.com/sitemap.xml" ];
-
-    protected array $headers = [
-        "Accept" => "*/*",
-        "Host" => "firstteaminc.com"
-    ];
-
-//    public array $custom_products = [
-//      "https://www.firstteaminc.com/soccer-equipment/portable-soccer-goals/golden-goal"
-//    ];
 
     public function getProductsLinks( Data $data, string $url ): array
     {

@@ -8,7 +8,6 @@ use App\Feeds\Utils\Data;
 use App\Feeds\Utils\ParserCrawler;
 use App\Helpers\FeedHelper;
 use App\Helpers\StringHelper;
-use phpDocumentor\Reflection\PseudoTypes\LowercaseString;
 
 class Parser extends HtmlParser
 {
@@ -34,14 +33,13 @@ class Parser extends HtmlParser
         $weight = null;
 
         foreach ($features as $feature) {
+            $matches = [];
             $lower_feature = strtolower($feature);
-            if (preg_match("/\d*((\.\d+)|(\s+\d+\/\d+)*)(\"|')+[a-zA-z\s]*x[a-zA-z\s]*\d*((\.\d+)|(\s+\d+\/\d+)*)(\"|')+/",$lower_feature)) {
-                $matches = [];
-                preg_match("/\d*((\.\d+)|(\s+\d+\/\d+)*)(\"|')+[a-zA-z\s]*x[a-zA-z\s]*\d*((\.\d+)|(\s+\d+\/\d+)*)(\"|')+/",$lower_feature,$matches);
+            if (preg_match("/\d*((\.\d+)|(\s+\d+\/\d+)*)(\"|')+[a-zA-z\s]*x[a-zA-z\s]*\d*((\.\d+)|(\s+\d+\/\d+)*)(\"|')+/",$lower_feature,$matches)) {
                 $dims = FeedHelper::getDimsInString($matches[0],"x");
             }
-            else if (str_contains($lower_feature, "weight")) {
-                if (str_contains($lower_feature, "shipping weight")) {
+            else if (str_contains($lower_feature, "weight") || str_contains($lower_feature, "wt")) {
+                if (str_contains($lower_feature, "shipping")) {
                     $matches = [];
                     preg_match("/\d+/", $lower_feature,$matches);
                     $shipping_weight = $matches[0];
@@ -133,17 +131,17 @@ class Parser extends HtmlParser
 
     public function getDimX(): ?float
     {
-        return $this->isGroup() ? $this->dims["x"] : null;
+        return $this->dims["x"];
     }
 
     public function getDimY(): ?float
     {
-        return $this->isGroup() ? $this->dims["y"] : null;
+        return $this->dims["y"];
     }
 
     public function getDimZ(): ?float
     {
-        return $this->isGroup() ? $this->dims["z"] : null;
+        return $this->dims["z"];
     }
 
     public function getShippingWeight(): ?float
@@ -178,12 +176,12 @@ class Parser extends HtmlParser
 
     public function getAvail(): ?int
     {
-        if($this->getText(".in-stock") === "In Stock")
-            return self::DEFAULT_AVAIL_NUMBER;
-        else if(str_contains($this->getAttr(".store-product-description p > img","alt"),"Stock")) {
-            return self::DEFAULT_AVAIL_NUMBER;
+        $avail = 0;
+        if($this->getText(".in-stock") === "In Stock" || str_contains($this->getAttr(".store-product-description p > img","alt"),"Stock")) {
+            $avail = self::DEFAULT_AVAIL_NUMBER;
         }
-        return 0;
+
+        return $avail;
     }
 
     public function getDescription(): string
@@ -195,11 +193,24 @@ class Parser extends HtmlParser
         }
 
         // поискать описание в features
-        $this->filter(".store-product-description > *:nth-child(2)")->each(static function(ParserCrawler $c) use(&$description){
+        else {
+            $this->filter(".store-product-description > *:nth-child(2)")->each(static function(ParserCrawler $c) use(&$description){
             if($c->nodeName() === "p") {
                 $description = $c->outerHtml();
             }
         });
+        }
+
+
+        // если описание дублировка short_desc, нужно убрать.
+        if(str_contains($description,"Features")) {
+            $description = "";
+        }
+
+        // если описание пустое, ставить в место него название дочернего.
+        if(($description === "") && $this->exists(".product-options h3")) {
+            $description = $this->getText(".product-options h3");
+        }
 
         return $description;
     }
@@ -207,19 +218,16 @@ class Parser extends HtmlParser
     public function getVideos(): array
     {
         $videos = [];
-        $this->filter(".reveal")->each(static function (ParserCrawler $c) use (&$videos) {
+        $this->filter(".reveal")->each(function (ParserCrawler $c) use (&$videos) {
+            $id = $c->attr("id");
+            $name = $this->filter("a[data-open='$id']")->previousAll("h3")->text();
             $videos[] = [
-                "name" => $c->attr("id"),
+                "name" => $name,
                 "provider" => "youtube",
                 "video" => $c->getAttr("iframe", "src")
             ];
         });
         return $videos;
-    }
-
-    public function getCostToUs(): float
-    {
-        return 0.1;
     }
 
     public function getProductFiles(): array
@@ -253,11 +261,11 @@ class Parser extends HtmlParser
             $i++;
             $array = $this->parseFeatures($c->getContent(".product-options-description li"));
 
-            $fi->setShortdescr($array["short_description"]);
+            $fi->setShortdescr(array_merge($this->getShortDescription(),$array["short_description"]));
             $fi->setAttributes($array["attributes"] !== [] ? $array["attributes"] : null);
-            $fi->setDimX($array["dims"]["x"]);
-            $fi->setDimY($array["dims"]["y"]);
-            $fi->setDimZ($array["dims"]["z"]);
+            $fi->setDimX($array["dims"]["x"] ?: $this->getDimX());
+            $fi->setDimY($array["dims"]["y"] ?: $this->getDimY());
+            $fi->setDimZ($array["dims"]["z"] ?: $this->getDimZ());
             $fi->setShippingWeight($array["shipping_weight"]);
             $fi->setWeight($array["weight"]);
 

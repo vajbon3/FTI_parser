@@ -12,7 +12,6 @@ use App\Helpers\StringHelper;
 class Parser extends HtmlParser
 {
 
-    private const DOMAIN = "https://www.firstteaminc.com";
 
     private array $short_description = [];
     private ?array $attributes = null;
@@ -156,17 +155,7 @@ class Parser extends HtmlParser
 
     public function getImages(): array
     {
-
-        // relative ссылки
-        $image_sources =  $this->filter(".store-product-thumb")->each(static fn(ParserCrawler $c) => $c->attr("href"));
-
-
-        // конвертирование в абсолютный
-        foreach ($image_sources as &$image_source) {
-            $image_source = self::DOMAIN . $image_source;
-        }
-
-        return $image_sources;
+        return $this->filter(".store-product-thumb")->each(static fn(ParserCrawler $c) => $c->attr("href"));
     }
 
     public function getCategories(): array

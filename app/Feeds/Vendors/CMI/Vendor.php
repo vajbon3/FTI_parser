@@ -15,12 +15,6 @@ class Vendor extends SitemapHttpProcessor
 
     protected array $first = [ "https://www.blankstyle.com/sitemap.xml" ];
 
-    protected ?int $max_products = 20;
-//    public array $custom_products = [
-//        "https://www.blankstyle.com//4820-hanes-cool-dri-performance-t-shirt",
-//        "https://www.blankstyle.com//stilo-apparel-sa7000-womens-white-bodysuit-923-max-bulk-disc"
-//        ];
-
     public function getProductsLinks( Data $data, string $url ): array
     {
         for ( $i = 0; $i < 5; $i++ ) {

@@ -13,10 +13,11 @@ use App\Helpers\StringHelper;
 class Parser extends HtmlParser
 {
 
+    private string $description;
     private array $dims = [
-        "x" => null,
-        "y" => null,
-        "z" => null
+        'x' => null,
+        'y' => null,
+        'z' => null
     ];
 
     // помошники
@@ -25,60 +26,48 @@ class Parser extends HtmlParser
         preg_match_all("/\d+/",$uc_matrix_string,$matches);
         return $matches;
     }
-    public function parseContent(Data $data, array $params = []): array
+
+    public function beforeParse(): void
     {
-        for ($i = 0; $i < 5; $i++) {
-            if (!StringHelper::isNotEmpty($data->getData())) {
-                $data = $this->getVendor()->getDownloader()->get($params["url"]);
-            } else {
-                break;
-            }
-        }
+        $this->description = $this->getHtml("#tbmore_info");
 
-        if (!StringHelper::isNotEmpty($data->getData())) {
-            return [];
+        // ишем стринг размеров
+        $matches = [];
+        if (preg_match("/\d*((\.\d+)|(\s+\d+\/\d+)*)(\"|')+[a-zA-z\s]*x[a-zA-z\s]*\d*((\.\d+)|(\s+\d+\/\d+)*)(\"|')+([a-zA-z\s]*x[a-zA-z\s]*\d*((\.\d+)|(\s+\d+\/\d+)*)(\"|')+)*/",$this->description,$matches)) {
+            $this->dims = FeedHelper::getDimsInString($matches[0],"x");
         }
-
-        return parent::parseContent($data, $params);
     }
 
     public function getProduct(): string
     {
-        $name = $this->getText("h1.title");
-        if($name !== "") {
-            return preg_replace( '/[^a-z0-9\s]/i', '', $name);
-        }
-        return "";
+        return preg_replace( '/[^a-z0-9\s]/i', '', $this->getText("h1.title"));
     }
 
     public function getMpn(): string
     {
         try {
             return trim(explode(":",$this->getText("h1.title > small"))[1]);
-        } catch (\Exception $exception) {
+        } catch (\Exception) {
             return "";
         }
     }
 
     public function getShortDescription(): array
     {
-        return $this->getContent(".product-body li");
+        $features = [];
+
+        $this->filter(".product-body div")->each(static function(ParserCrawler $c) use(&$features) {
+            if(stripos($c->getText("span"), "feature") !== false) {
+               $features = $c->nextAll()->getContent("li");
+           }
+        });
+
+        return $features;
     }
 
     public function getDescription(): string
     {
-        // если в место features описание, прибовляем
-        $description = $this->getHtml(".product-body p");
-
-        $description .= $this->getHtml("#tbmore_info");
-
-        // ишем стринг размеров
-        $matches = [];
-        if (preg_match("/\d*((\.\d+)|(\s+\d+\/\d+)*)(\"|')+[a-zA-z\s]*x[a-zA-z\s]*\d*((\.\d+)|(\s+\d+\/\d+)*)(\"|')+([a-zA-z\s]*x[a-zA-z\s]*\d*((\.\d+)|(\s+\d+\/\d+)*)(\"|')+)*/",$description,$matches)) {
-            $this->dims = FeedHelper::getDimsInString($matches[0],"x");
-        }
-
-        return $description;
+        return $this->description;
     }
 
     public function getDimX(): ?float
@@ -99,7 +88,8 @@ class Parser extends HtmlParser
     public function getCategories(): array
     {
         $categories = $this->filter("div.breadcrumb a")->each(static fn(ParserCrawler $c) => $c->text());
-        return array_slice($categories,0,count($categories)/2);
+        $categories = array_slice($categories,0,count($categories)/2);
+        return array_slice($categories,0,5);
     }
 
     public function getAvail(): ?int
@@ -109,7 +99,8 @@ class Parser extends HtmlParser
 
     public function getImages(): array
     {
-        return [$this->getAttr(".thumb-view a","href")];
+        $exampleImage = $this->getAttr(".thumb-view a","href");
+        return $exampleImage !== "" ? [$exampleImage] : [$this->getAttr(".main-product-image a","href")];
     }
 
     public function isGroup(): bool
@@ -127,12 +118,18 @@ class Parser extends HtmlParser
         // ключ атрибута
         $attribute_key = $this->getAttr("select.color-select-picker","name");
 
-        // id цвет
-        $colors = $this->filter("select.color-select-picker option")->each(static fn(ParserCrawler $c) => $c->attr("value"));
+        // id цвет и имена
+        $colors = $this->filter("select.color-select-picker option")->each(static fn(ParserCrawler $c) => ["id" => $c->attr("value"), "name" => $c->text()]);
+
+        // размеры
+        $sizes = [];
+        $this->filter(".input-qty-cell")->each(static function(ParserCrawler $c) use(&$sizes) {
+            $sizes[$c->attr("data-oid")] = $c->closest(".size-field")->getText(".size-label");
+        });
 
         foreach($colors as $color) {
             $params = [
-                $attribute_key => $color,
+                $attribute_key => $color["id"],
                 "nid" => $nid,
                 "qty" => 1,
             ];
@@ -148,14 +145,14 @@ class Parser extends HtmlParser
                     }
 
                     $fi = clone $parent_fi;
-                    $fi->setMpn($parent_fi->getMpn() . "-" . $color . "-" . $size_id);
+                    $fi->setMpn("color:" . $color["name"] . ",size:" . $sizes[$size_id]);
                     $fi->setCostToUs(StringHelper::getMoney($info["price"]));
                     $fi->setListPrice(StringHelper::getMoney($info["MSRP"]));
                     $fi->setRAvail((int)$info["inventory"]);
-                    $fi->setAttributes(["prime" => $info["prime"], "finalSale" => $info["finalSale"]]);
 
                     // изображения
-                    $fi->setImages($this->filter(".thumb-view a[data-oid='$color']")
+                    $color_id = $color["id"];
+                    $fi->setImages($this->filter(".thumb-view a[data-oid='$color_id']")
                                 ->each(static fn(ParserCrawler $c) => $c->attr("href")));
 
                     $child[] = $fi;

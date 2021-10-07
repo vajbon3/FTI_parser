@@ -113,6 +113,17 @@ class Parser extends HtmlParser
         // id продукта
         $nid = $this->getAttr("input[name='nid']",'value');
 
+        // взять контеинер изображении
+        $product_data = [];
+        $links = ["blankstyle.com/magiczoom-thumbnails-lazyload/$nid"];
+        foreach ($this->getVendor()->getDownloader()->fetch($links) as $data) {
+            $matches = [];
+            preg_match('/{"status".*}}/',$data,$matches);
+            $json = json_decode($matches[0], true, 512, JSON_THROW_ON_ERROR);
+
+        }
+        $c = new ParserCrawler($json["data"]["content"]);
+
         // ключ атрибута
         $attribute_key = $this->getAttr('select.color-select-picker','name');
 
@@ -148,14 +159,14 @@ class Parser extends HtmlParser
                     $color_id = $color['id'];
                     $size_name = $sizes[$size_id];
 
-                    $fi->setProduct("Color:$color_name, Size:$size_name");
+                    $fi->setProduct("Color: $color_name, Size: $size_name");
                     $fi->setMpn($this->getMpn() . '-' . $color_id . '-' . $size_id);
                     $fi->setCostToUs(StringHelper::getMoney($info['price']));
                     $fi->setListPrice(StringHelper::getMoney($info['MSRP']));
                     $fi->setRAvail((int)$info['inventory']);
 
                     // изображения
-                    $fi->setImages($this->filter(".thumb-view a[data-oid='$color_id']")
+                    $fi->setImages($c->filter(".thumb-view a[data-oid='$color_id']")
                                 ->each(static fn(ParserCrawler $c) => $c->attr('href')));
 
                     $child[] = $fi;

@@ -21,32 +21,34 @@ class Parser extends HtmlParser
     ];
 
     // помошники
-    public function getNumbers(string $uc_matrix_string) : array {
+    public function getNumbers(string $uc_matrix_string): array
+    {
         $matches = [];
-        preg_match_all("/\d+/",$uc_matrix_string,$matches);
+        preg_match_all("/\d+/", $uc_matrix_string, $matches);
         return $matches;
     }
 
     public function beforeParse(): void
     {
-        $this->description = $this->getHtml('#tbmore_info');
+        // убрать лишние ковички, если есть
+        $this->description = str_replace('""', "", $this->getHtml('#tbmore_info'));
 
         // ишем стринг размеров
         $matches = [];
-        if (preg_match("/\d*((\.\d+)|(\s+\d+\/\d+)*)(\"|')+[a-zA-z\s]*x[a-zA-z\s]*\d*((\.\d+)|(\s+\d+\/\d+)*)(\"|')+([a-zA-z\s]*x[a-zA-z\s]*\d*((\.\d+)|(\s+\d+\/\d+)*)(\"|')+)*/",$this->description,$matches)) {
-            $this->dims = FeedHelper::getDimsInString($matches[0],'x');
+        if (preg_match("/\d*((\.\d+)|(\s+\d+\/\d+)*)(\"|')+[a-zA-z\s]*x[a-zA-z\s]*\d*((\.\d+)|(\s+\d+\/\d+)*)(\"|')+([a-zA-z\s]*x[a-zA-z\s]*\d*((\.\d+)|(\s+\d+\/\d+)*)(\"|')+)*/", $this->description, $matches)) {
+            $this->dims = FeedHelper::getDimsInString($matches[0], 'x');
         }
     }
 
     public function getProduct(): string
     {
-        return preg_replace( '/[^a-z0-9\s]/i', '', $this->getText('h1.title'));
+        return preg_replace('/[^a-z0-9\s]/i', '', $this->getText('h1.title'));
     }
 
     public function getMpn(): string
     {
         try {
-            return trim(explode(':',$this->getText('h1.title > small'))[1]);
+            return trim(explode(':', $this->getText('h1.title > small'))[1]);
         } catch (\Exception) {
             return '';
         }
@@ -56,11 +58,18 @@ class Parser extends HtmlParser
     {
         $features = [];
 
-        $this->filter('.product-body div')->each(static function(ParserCrawler $c) use(&$features) {
-            if(stripos($c->getText('span'), 'feature') !== false) {
-               $features = $c->nextAll()->getContent('li');
-           }
-        });
+        if ($this->exists(".product-body div")) {
+            $this->filter('.product-body div')->each(static function (ParserCrawler $c) use (&$features) {
+                if (stripos($c->getText('span'), 'feature') !== false) {
+                    $features = $c->nextAll()->getContent('li');
+                }
+            });
+        } else {
+            $features = $this->getContent(".product-body li");
+            if($features === []) {
+                $this->getContent(".product-body > *:not(table)");
+            }
+        }
 
         return $features;
     }
@@ -87,7 +96,7 @@ class Parser extends HtmlParser
 
     public function getCategories(): array
     {
-          return array_slice(array_values( array_unique($this->getContent('div.breadcrumb a'))),0,5);
+        return array_slice(array_values(array_unique($this->getContent('div.breadcrumb a'))), 0, 5);
     }
 
     public function getAvail(): ?int
@@ -97,8 +106,8 @@ class Parser extends HtmlParser
 
     public function getImages(): array
     {
-        $exampleImage = $this->getAttr('.thumb-view a','href');
-        return $exampleImage !== '' ? [$exampleImage] : [$this->getAttr('.main-product-image a','href')];
+        $exampleImage = $this->getAttr('.thumb-view a', 'href');
+        return $exampleImage !== '' ? [$exampleImage] : [$this->getAttr('.main-product-image a', 'href')];
     }
 
     public function isGroup(): bool
@@ -111,45 +120,67 @@ class Parser extends HtmlParser
         $child = [];
 
         // id продукта
-        $nid = $this->getAttr("input[name='nid']",'value');
+        $nid = $this->getAttr("input[name='nid']", 'value');
 
         // взять контеинер изображении
         $product_data = [];
         $links = ["blankstyle.com/magiczoom-thumbnails-lazyload/$nid"];
         foreach ($this->getVendor()->getDownloader()->fetch($links) as $data) {
             $matches = [];
-            preg_match('/{"status".*}}/',$data,$matches);
+            preg_match('/{"status".*}}/', $data, $matches);
             $json = json_decode($matches[0], true, 512, JSON_THROW_ON_ERROR);
 
         }
         $c = new ParserCrawler($json["data"]["content"]);
 
         // ключ атрибута
-        $attribute_key = $this->getAttr('select.color-select-picker','name');
+        $attribute_key = $this->getAttr('select.color-select-picker', 'name');
 
         // id цвет и имена
         $colors = $this->filter('select.color-select-picker option')->each(static fn(ParserCrawler $c) => ['id' => $c->attr('value'), 'name' => $c->text()]);
 
         // размеры
         $sizes = [];
-        $this->filter('.input-qty-cell')->each(static function(ParserCrawler $c) use(&$sizes) {
+
+        // mapping для размеров потому что на саите используются две стандартные имена
+        $sizes['map'] = [
+            '2XL' => 'XXL',
+            '3XL' => 'XXXL',
+            '4XL' => 'XXXXL'
+        ];
+
+        $this->filter('.input-qty-cell')->each(static function (ParserCrawler $c) use (&$sizes) {
             $sizes[$c->attr('data-oid')] = $c->closest('.size-field')->getText('.size-label');
         });
 
-        foreach($colors as $color) {
+        // взять ширину и длину всех размеров, если таблица есть
+        if ($this->exists(".product-body table")) {
+            $i = 2;
+            $this->filter(".product-body table tbody tr:nth-child(1) td")->each(function (ParserCrawler $c) use (&$sizes, &$i) {
+                if (stripos($c->text(), "size") !== false) {
+                    return;
+                }
+                isset($sizes[$c->text()]) ?: $sizes[$c->text()] = ['x' => null, 'y' => null];
+                $sizes[$c->text()]['x'] = $this->getText(".product-body table tbody tr:nth-child(2) td:nth-child($i)");
+                $sizes[$c->text()]['y'] = $this->getText(".product-body table tbody tr:nth-child(3) td:nth-child($i)");
+                $i++;
+            });
+        }
+
+        foreach ($colors as $color) {
             $params = [
                 $attribute_key => $color['id'],
                 'nid' => $nid,
                 'qty' => 1,
             ];
 
-            $links = [new Link("https://www.blankstyle.com/cart/add-to-cart-form/$nid",'POST',$params, 'form-data')];
+            $links = [new Link("https://www.blankstyle.com/cart/add-to-cart-form/$nid", 'POST', $params, 'form-data')];
 
             foreach ($this->getVendor()->getDownloader()->fetch($links) as $data) {
                 $product_data = $data->getJSON();
 
-                foreach($product_data as $size_id => $info) {
-                    if($size_id === 'otherDetail') {
+                foreach ($product_data as $size_id => $info) {
+                    if ($size_id === 'otherDetail') {
                         continue;
                     }
 
@@ -165,9 +196,15 @@ class Parser extends HtmlParser
                     $fi->setListPrice(StringHelper::getMoney($info['MSRP']));
                     $fi->setRAvail((int)$info['inventory']);
 
+                    // ставить размеры
+                    $size_key = isset($sizes['map'][$size_name]) ? $sizes["map"][$size_name] : $size_name;
+                    isset($sizes[$size_key]) ?: $sizes[$size_key] = ['x' => null, 'y' => null];
+                    $fi->setDimX((float)$sizes[$size_key]['x']);
+                    $fi->setDimY((float)$sizes[$size_key]['y']);
+
                     // изображения
                     $fi->setImages($c->filter(".thumb-view a[data-oid='$color_id']")
-                                ->each(static fn(ParserCrawler $c) => $c->attr('href')));
+                        ->each(static fn(ParserCrawler $c) => $c->attr('href')));
 
                     $child[] = $fi;
                 }

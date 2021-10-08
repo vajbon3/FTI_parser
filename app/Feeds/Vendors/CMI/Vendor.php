@@ -31,6 +31,7 @@ class Vendor extends SitemapHttpProcessor
 
     public function isValidFeedItem(FeedItem $fi ): bool
     {
-        return !($fi->getMpn() === '' && !$fi->isGroup());
+        return !($fi->getMpn() === '' && !$fi->isGroup()) && stripos($fi->getFulldescr(),"discontinued") === false
+            && ($fi->isGroup() || $fi->getCostToUs() > 0);
     }
 }

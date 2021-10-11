@@ -13,7 +13,8 @@ use App\Helpers\StringHelper;
 class Parser extends HtmlParser
 {
 
-    private string $description;
+    private array $features = [];
+    private string $description = "";
     private array $dims = [
         'x' => null,
         'y' => null,
@@ -33,10 +34,34 @@ class Parser extends HtmlParser
         // убрать лишние ковички, если есть
         $this->description = str_replace('""', "", $this->getHtml('#tbmore_info'));
 
-        // ишем стринг размеров
+        // ишем стринг размеров в текст в 5' x 6' формат
         $matches = [];
         if (preg_match("/\d*((\.\d+)|(\s+\d+\/\d+)*)(\"|')+[a-zA-z\s]*x[a-zA-z\s]*\d*((\.\d+)|(\s+\d+\/\d+)*)(\"|')+([a-zA-z\s]*x[a-zA-z\s]*\d*((\.\d+)|(\s+\d+\/\d+)*)(\"|')+)*/", $this->description, $matches)) {
             $this->dims = FeedHelper::getDimsInString($matches[0], 'x');
+        }
+        // если есть таблица в стиле width - height, возмём обший размер товара
+        if($this->exists(".product-body table")) {
+            if(stripos($this->getText(".product-body table tr td"),"width") !== false) {
+                $this->dims['x'] = StringHelper::getFloat($this->getText(".product-body table tr:nth-child(2) td"));
+                $this->dims['y'] = StringHelper::getFloat($this->getText(".product-body table tr:nth-child(2) td:nth-child(2)"));
+            }
+        }
+
+        // описание и short_desc
+        if ($this->exists(".product-body div")) {
+            $this->filter('.product-body div')->each(function (ParserCrawler $c) {
+                if (stripos($c->getText('span'), 'feature') !== false) {
+                    $this->features = $c->nextAll()->getContent('li');
+                }
+            });
+        } else {
+            $this->features = $this->getContent(".product-body li");
+
+            // если списка нету для features, а описание пустой - сунуть всё в описание
+            if(($this->features === []) && $this->description === "") {
+                // фильтрировать параграф таблицы и сам таблицу
+                $this->description = preg_replace("/<p><strong>specs.*<table.*table>/is","",$this->getHtml(".product-body"));
+            }
         }
     }
 
@@ -54,24 +79,14 @@ class Parser extends HtmlParser
         }
     }
 
+    public function getCostToUs(): float
+    {
+        return StringHelper::getMoney($this->getText("#green-price span"));
+    }
+
     public function getShortDescription(): array
     {
-        $features = [];
-
-        if ($this->exists(".product-body div")) {
-            $this->filter('.product-body div')->each(static function (ParserCrawler $c) use (&$features) {
-                if (stripos($c->getText('span'), 'feature') !== false) {
-                    $features = $c->nextAll()->getContent('li');
-                }
-            });
-        } else {
-            $features = $this->getContent(".product-body li");
-            if($features === []) {
-                $this->getContent(".product-body > *:not(table)");
-            }
-        }
-
-        return $features;
+        return $this->features;
     }
 
     public function getDescription(): string
@@ -180,6 +195,9 @@ class Parser extends HtmlParser
                 $product_data = $data->getJSON();
 
                 foreach ($product_data as $size_id => $info) {
+                    if(!isset($sizes[$size_id])) {
+                        continue;
+                    }
                     if ($size_id === 'otherDetail') {
                         continue;
                     }
@@ -203,8 +221,11 @@ class Parser extends HtmlParser
                     $fi->setDimY((float)$sizes[$size_key]['y']);
 
                     // изображения
-                    $fi->setImages($c->filter(".thumb-view a[data-oid='$color_id']")
-                        ->each(static fn(ParserCrawler $c) => $c->attr('href')));
+                    $images = $c->filter(".thumb-view a[data-oid='$color_id']")
+                        ->each(static fn(ParserCrawler $c) => $c->attr('href'));
+
+                    // если изображения есть, ставить, если нету - использовать основной
+                    $fi->setImages($images !== [] ? $images : [$this->getAttr(".main-product-image a","href")]);
 
                     $child[] = $fi;
                 }

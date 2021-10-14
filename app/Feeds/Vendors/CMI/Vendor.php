@@ -15,6 +15,10 @@ class Vendor extends SitemapHttpProcessor
 
     protected array $first = [ 'https://www.blankstyle.com/sitemap.xml' ];
 
+    public array $custom_products = [
+        "https://www.blankstyle.com/25-pack-sm2025p-face-mask-cloth-earloop-198ea-max-disc",
+    ];
+
     public function filterProductLinks( Link $link ): bool
     {
         $url = explode('.com/',$link->getUrl())[1];

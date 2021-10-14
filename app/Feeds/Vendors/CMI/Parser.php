@@ -36,7 +36,7 @@ class Parser extends HtmlParser
 
         // ишем стринг размеров в текст в 5' x 6' формат
         $matches = [];
-        if (preg_match("/\d*((\.\d+)|(\s+\d+\/\d+)*)(\"|')+[a-zA-z\s]*x[a-zA-z\s]*\d*((\.\d+)|(\s+\d+\/\d+)*)(\"|')+([a-zA-z\s]*x[a-zA-z\s]*\d*((\.\d+)|(\s+\d+\/\d+)*)(\"|')+)*/", $this->description, $matches)) {
+        if (preg_match("/\d*((\.\d+)|(\s+\d+\/\d+)*)[\"']+[a-zA-z\s]*x[a-zA-z\s]*\d*((\.\d+)|(\s+\d+\/\d+)*)[\"']+([a-zA-z\s]*x[a-zA-z\s]*\d*((\.\d+)|(\s+\d+\/\d+)*)[\"']+)*/", $this->description, $matches)) {
             $this->dims = FeedHelper::getDimsInString($matches[0], 'x');
         }
         // если есть таблица в стиле width - height, возмём обший размер товара
@@ -168,16 +168,16 @@ class Parser extends HtmlParser
             $sizes[$c->attr('data-oid')] = $c->closest('.size-field')->getText('.size-label');
         });
 
-        // взять ширину и длину всех размеров, если таблица есть
-        if ($this->exists(".product-body table")) {
+        // взять ширину и длину всех размеров, если правилная таблица есть
+        if (stripos($this->getText(".product-body table tr td"),"width") !== false) {
             $i = 2;
             $this->filter(".product-body table tbody tr:nth-child(1) td")->each(function (ParserCrawler $c) use (&$sizes, &$i) {
                 if (stripos($c->text(), "size") !== false) {
                     return;
                 }
                 isset($sizes[$c->text()]) ?: $sizes[$c->text()] = ['x' => null, 'y' => null];
-                $sizes[$c->text()]['x'] = $this->getText(".product-body table tbody tr:nth-child(2) td:nth-child($i)");
-                $sizes[$c->text()]['y'] = $this->getText(".product-body table tbody tr:nth-child(3) td:nth-child($i)");
+                $sizes[$c->text()]['x'] = StringHelper::getFloat($this->getText(".product-body table tbody tr:nth-child(2) td:nth-child($i)"));
+                $sizes[$c->text()]['y'] = StringHelper::getFloat($this->getText(".product-body table tbody tr:nth-child(3) td:nth-child($i)"));
                 $i++;
             });
         }
@@ -217,8 +217,8 @@ class Parser extends HtmlParser
                     // ставить размеры
                     $size_key = isset($sizes['map'][$size_name]) ? $sizes["map"][$size_name] : $size_name;
                     isset($sizes[$size_key]) ?: $sizes[$size_key] = ['x' => null, 'y' => null];
-                    $fi->setDimX((float)$sizes[$size_key]['x']);
-                    $fi->setDimY((float)$sizes[$size_key]['y']);
+                    $fi->setDimX($sizes[$size_key]['x'] ?? $this->getDimX());
+                    $fi->setDimY($sizes[$size_key]['y'] ?? $this->getDimX());
 
                     // изображения
                     $images = $c->filter(".thumb-view a[data-oid='$color_id']")

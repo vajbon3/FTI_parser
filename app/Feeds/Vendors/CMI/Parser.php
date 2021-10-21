@@ -22,43 +22,63 @@ class Parser extends HtmlParser
     ];
 
     // помошники
-    public function getNumbers(string $uc_matrix_string): array
+    private function parseDims(string $dims) : string
     {
-        $matches = [];
-        preg_match_all("/\d+/", $uc_matrix_string, $matches);
-        return $matches;
+        $result = '';
+
+        $dims = str_replace(' ','',$dims);
+
+        $h = stripos($dims,'h');
+        $w = stripos($dims,'w');
+        if($h < $w) {
+            $result = substr($dims,$h+2,$w-$h) . substr($dims,0,$h+1) . substr($dims,$w+1);
+        } else {
+            $result = $dims;
+        }
+        print(PHP_EOL.$result.PHP_EOL);
+        return $result;
     }
 
     public function beforeParse(): void
     {
         // убрать лишние ковички, если есть
-        $this->description = str_replace('""', "", $this->getHtml('#tbmore_info'));
+        $this->description = str_replace('""', '', $this->getHtml('#tbmore_info'));
 
         // ишем стринг размеров в текст в 5' x 6' формат
+        $description2 = $this->getHtml('.product-body');
+
         $matches = [];
-        if (preg_match("/\d*((\.\d+)|(\s+\d+\/\d+)*)[\"']+[a-zA-z\s]*x[a-zA-z\s]*\d*((\.\d+)|(\s+\d+\/\d+)*)[\"']+([a-zA-z\s]*x[a-zA-z\s]*\d*((\.\d+)|(\s+\d+\/\d+)*)[\"']+)*/", $this->description, $matches)) {
+        if (preg_match("/\d*((\.\d+)|(\s+\d+\/\d+)*)[\"']+[a-zA-z\s]*x[a-zA-z\s]*\d*((\.\d+)|(\s+\d+\/\d+)*)[\"']+([a-zA-z\s]*x[a-zA-z\s]*\d*((\.\d+)|(\s+\d+\/\d+)*)[\"']+)*/", $description2, $matches) ||
+            preg_match("/\d*((\.\d+)|(\s+\d+\/\d+)*)[\"']+[a-zA-z\s]*x[a-zA-z\s]*\d*((\.\d+)|(\s+\d+\/\d+)*)[\"']+([a-zA-z\s]*x[a-zA-z\s]*\d*((\.\d+)|(\s+\d+\/\d+)*)[\"']+)*/", $this->description, $matches)) {
+
+            // парсируем формат если присутствует 'h'
+            if(stripos($matches[0],'h') !== false) {
+                $matches[0] = $this->parseDims($matches[0]);
+            }
+
             $this->dims = FeedHelper::getDimsInString($matches[0], 'x');
         }
+
         // если есть таблица в стиле width - height, возмём обший размер товара
-        if($this->exists(".product-body table")) {
-            if(stripos($this->getText(".product-body table tr td"),"width") !== false) {
-                $this->dims['x'] = StringHelper::getFloat($this->getText(".product-body table tr:nth-child(2) td"));
-                $this->dims['y'] = StringHelper::getFloat($this->getText(".product-body table tr:nth-child(2) td:nth-child(2)"));
+        if($this->exists('.product-body table')) {
+            if(stripos($this->getText('.product-body table tr td'),'width') !== false) {
+                $this->dims['x'] = StringHelper::getFloat($this->getText('.product-body table tr:nth-child(2) td'));
+                $this->dims['y'] = StringHelper::getFloat($this->getText('.product-body table tr:nth-child(2) td:nth-child(2)'));
             }
         }
 
         // описание и short_desc
-        if ($this->exists(".product-body div")) {
+        if ($this->exists('.product-body div')) {
             $this->filter('.product-body div')->each(function (ParserCrawler $c) {
                 if (stripos($c->getText('span'), 'feature') !== false) {
                     $this->features = $c->nextAll()->getContent('li');
                 }
             });
         } else {
-            $this->features = $this->getContent(".product-body li");
+            $this->features = $this->getContent('.product-body li');
 
             // если списка нету для features, а описание пустой - сунуть всё в описание
-            if(($this->features === []) && $this->description === "") {
+            if(($this->features === []) && $this->description === '') {
                 // фильтрировать параграф таблицы и сам таблицу
                 $this->description = preg_replace("/<p><strong>specs.*<table.*table>/is","",$this->getHtml(".product-body"));
             }
@@ -81,7 +101,11 @@ class Parser extends HtmlParser
 
     public function getCostToUs(): float
     {
-        return StringHelper::getMoney($this->getText("#green-price span"));
+        $cost = StringHelper::getMoney($this->getText('#green-price span'));
+        if($cost === 0.0) {
+            return StringHelper::getMoney($this->getText('#msrp'));
+        }
+        return $cost;
     }
 
     public function getShortDescription(): array

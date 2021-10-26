@@ -4,9 +4,7 @@ namespace App\Feeds\Vendors\IMS;
 
 use App\Feeds\Feed\FeedItem;
 use App\Feeds\Parser\HtmlParser;
-use App\Feeds\Utils\Data;
 use App\Feeds\Utils\ParserCrawler;
-use App\Helpers\FeedHelper;
 use App\Helpers\StringHelper;
 
 class Parser extends HtmlParser
@@ -21,7 +19,7 @@ class Parser extends HtmlParser
     public function beforeParse(): void
     {
         $this->description = $this->getHtml('div.description div.value');
-        $this->short_desc = $this->getContent('#bulletdescription\\.tab li');
+        $this->short_desc = $this->getContent("div[id*='bulletdescription'] li");
 
         // удалить features из описания и сунуть в short_desc если есть
         if (preg_match('/<strong><p>features.*<ul>.*<\/ul>/isU', $this->description)) {
@@ -83,6 +81,11 @@ class Parser extends HtmlParser
                 $this->children[$id]['prices']['cost_to_us'] = $prices['finalPrice']['amount'];
                 $this->children[$id]['prices']['msrp'] = $prices['basePrice']['amount'];
             }
+
+            // stock
+            foreach($data['stock_status'] as $id => $status) {
+                $this->children[$id]['avail'] = stripos($status,"out of stock") === false ? self::DEFAULT_AVAIL_NUMBER : 0;
+            }
         }
 
         // изображения для основного
@@ -100,7 +103,7 @@ class Parser extends HtmlParser
         if(isset($breadcrumbs_matches[0])) {
             $data = json_decode($breadcrumbs_matches[0], true, 512, JSON_THROW_ON_ERROR);
 
-            $data = $data['.breadcrumbs']['breadcrumbs']['categoriesConfig']['default'];
+            $data = $data['.breadcrumbs']['breadcrumbs']['categoriesConfig']['default'] ?? [];
 
             foreach($data as $url) {
                 $breadcrumbs_matches = [];
@@ -150,9 +153,9 @@ class Parser extends HtmlParser
     public function getVideos(): array
     {
         $videos = [];
-        $this->filter('div.description iframe')->each(static function (ParserCrawler $c) use (&$videos) {
+        $this->filter('div.description iframe')->each(function (ParserCrawler $c) use (&$videos) {
             $videos[] = [
-                'name' => $c->getText('ytp-title-link'),
+                'name' => $this->getProduct(),
                 'provider' => 'youtube',
                 'video' => $c->attr('src')
             ];
@@ -172,7 +175,7 @@ class Parser extends HtmlParser
 
     public function getAvail(): ?int
     {
-        return self::DEFAULT_AVAIL_NUMBER;
+        return (stripos($this->getText('.availability_message'),'out of stock') === false) ? self::DEFAULT_AVAIL_NUMBER : 0;
     }
 
     public function isGroup(): bool
@@ -194,8 +197,11 @@ class Parser extends HtmlParser
             $child_fi->setMpn($child_info['sku']);
             $child_fi->setImages($child_info['images'] ?? $parent_fi->getImages());
             $child_fi->setCostToUs($child_info['prices']['cost_to_us']);
-            $child_fi->setListPrice($child_info['prices']['msrp']);
-
+            // если listPrice > costToUs ставить
+            if($child_info['prices']['msrp'] > $child_fi->getCostToUs()) {
+                $child_fi->setListPrice($child_info['prices']['msrp']);
+            }
+            $child_fi->setRAvail($child_info['avail'] ?? self::DEFAULT_AVAIL_NUMBER);
             $child[] = $child_fi;
         }
 
